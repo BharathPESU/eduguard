@@ -1,5 +1,5 @@
 import json
-from app.llm.bedrock_client import invoke_llm_async
+from app.llm.nvidia_client import invoke_llm_async
 from app.config import settings
 
 PLAGIARISM_SYSTEM_PROMPT = """You are an academic integrity analyzer.

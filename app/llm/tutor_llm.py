@@ -1,4 +1,4 @@
-from app.llm.bedrock_client import invoke_llm_async
+from app.llm.nvidia_client import invoke_llm_async
 from app.config import settings
 
 TUTOR_SYSTEM_PROMPT = """You are a Socratic AI tutor for school and college students.

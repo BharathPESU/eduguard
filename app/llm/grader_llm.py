@@ -1,5 +1,5 @@
 import json
-from app.llm.bedrock_client import invoke_llm_async
+from app.llm.nvidia_client import invoke_llm_async
 from app.config import settings
 
 GRADER_SYSTEM_PROMPT = """You are a strict but fair exam grader.
