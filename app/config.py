@@ -21,4 +21,7 @@ class Settings:
     MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://localhost:27017")
     DB_NAME: str = os.getenv("DB_NAME", "eduguard")
 
+    MINIMAX_API_KEY: str = os.getenv("MINIMAX_API_KEY", "")
+    MINIMAX_IMAGE_MODEL: str = os.getenv("MINIMAX_IMAGE_MODEL", "image-01")
+
 settings = Settings()
