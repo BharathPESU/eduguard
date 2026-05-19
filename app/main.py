@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes.tutor import router as tutor_router
 from app.routes.exam import router as exam_router
 from app.routes.image import router as image_router
+from app.routes.documents import router as documents_router
+from app.routes.auth import router as auth_router
 from app.db.mongo import get_recent_violations, get_exam_submissions
 
 app = FastAPI(
@@ -28,6 +30,8 @@ app.add_middleware(
 app.include_router(tutor_router)
 app.include_router(exam_router)
 app.include_router(image_router)
+app.include_router(documents_router)
+app.include_router(auth_router)
 
 
 @app.get("/")
@@ -35,7 +39,16 @@ def root():
     return {
         "app": "EduGuard AI",
         "version": "1.0.0",
-        "endpoints": ["/tutor/ask", "/exam/validate", "/images/concept", "/docs"]
+        "endpoints": [
+            "/tutor/ask",
+            "/exam/validate",
+            "/images/concept",
+            "/documents/upload",
+            "/auth/signup",
+            "/auth/login",
+            "/auth/google",
+            "/docs",
+        ]
     }
 
 

@@ -41,5 +41,8 @@ Thumbs.db
 *.log
 logs/
 
+# Uploaded student documents
+storage/
+
 # Docker
 *.dockerignore

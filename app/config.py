@@ -1,7 +1,9 @@
 from dotenv import load_dotenv
 import os
+from pathlib import Path
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 class Settings:
     # NVIDIA NIM (active provider on feature/nvidia-nim-provider branch)
@@ -23,5 +25,13 @@ class Settings:
 
     MINIMAX_API_KEY: str = os.getenv("MINIMAX_API_KEY", "")
     MINIMAX_IMAGE_MODEL: str = os.getenv("MINIMAX_IMAGE_MODEL", "image-01")
+
+    DOCUMENT_STORAGE_DIR: str = os.getenv("DOCUMENT_STORAGE_DIR", "storage/documents")
+    MAX_DOCUMENT_SIZE_MB: int = int(os.getenv("MAX_DOCUMENT_SIZE_MB", "25"))
+
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
+    BACKEND_URL: str = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 settings = Settings()

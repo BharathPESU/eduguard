@@ -10,6 +10,26 @@ const client = axios.create({
   },
 })
 
+client.interceptors.request.use((config) => {
+  const token = localStorage.getItem('eduguard_access_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+export const signup = async (payload) => {
+  const res = await client.post('/auth/signup', payload)
+  return res.data
+}
+
+export const login = async (payload) => {
+  const res = await client.post('/auth/login', payload)
+  return res.data
+}
+
+export const getGoogleAuthUrl = () => {
+  return `${API_BASE}/auth/google`
+}
+
 export const tutorAsk = async (payload) => {
   const res = await client.post('/tutor/ask', payload)
   return res.data
@@ -18,6 +38,27 @@ export const tutorAsk = async (payload) => {
 export const generateConceptImage = async (payload) => {
   const res = await client.post('/images/concept', payload, { timeout: 120000 })
   return res.data
+}
+
+export const uploadDocument = async ({ studentId, file }) => {
+  const formData = new FormData()
+  formData.append('student_id', studentId)
+  formData.append('file', file)
+
+  const res = await client.post('/documents/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  })
+  return res.data
+}
+
+export const getDocuments = async (studentId) => {
+  const res = await client.get('/documents', { params: { student_id: studentId } })
+  return res.data
+}
+
+export const getDocumentDownloadUrl = (documentId) => {
+  return `${API_BASE}/documents/${documentId}/download`
 }
 
 export const examValidate = async (payload) => {

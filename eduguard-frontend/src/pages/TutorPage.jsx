@@ -1,9 +1,9 @@
-import { useState } from 'react'
-import { Send, Shield, BookOpen, AlertTriangle, CheckCircle, Image, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Send, Shield, BookOpen, AlertTriangle, CheckCircle, Image, Sparkles, Mic, MicOff, UploadCloud, FileText, Download } from 'lucide-react'
 import GlassCard from '../components/ui/GlassCard'
 import StatusBadge from '../components/ui/StatusBadge'
 import PipelineSteps from '../components/ui/PipelineSteps'
-import { generateConceptImage, tutorAsk } from '../api/client'
+import { generateConceptImage, getDocumentDownloadUrl, getDocuments, tutorAsk, uploadDocument } from '../api/client'
 import toast from 'react-hot-toast'
 
 const subjects = ['Physics', 'Math', 'Biology', 'Chemistry', 'History', 'English', 'Computer Science']
@@ -21,6 +21,47 @@ const TutorPage = () => {
   const [loading, setLoading] = useState(false)
   const [imageLoading, setImageLoading] = useState(false)
   const [conceptImages, setConceptImages] = useState([])
+  const [listening, setListening] = useState(false)
+  const [interimTranscript, setInterimTranscript] = useState('')
+  const [documents, setDocuments] = useState([])
+  const [documentsLoading, setDocumentsLoading] = useState(false)
+  const [uploadingDocument, setUploadingDocument] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const recognitionRef = useRef(null)
+  const fileInputRef = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop()
+    }
+  }, [])
+
+  useEffect(() => {
+    const studentId = form.student_id.trim()
+    if (!studentId) {
+      const timer = setTimeout(() => setDocuments([]), 0)
+      return () => clearTimeout(timer)
+    }
+
+    let cancelled = false
+    let timer
+    const loadDocuments = async () => {
+      setDocumentsLoading(true)
+      try {
+        const data = await getDocuments(studentId)
+        if (!cancelled) setDocuments(data)
+      } catch (e) {
+        if (!cancelled) toast.error('Document load error: ' + (e.response?.data?.detail || e.message))
+      }
+      if (!cancelled) setDocumentsLoading(false)
+    }
+
+    timer = setTimeout(loadDocuments, 0)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [form.student_id])
 
   const submit = async () => {
     if (!form.question.trim()) return toast.error('Please enter a question')
@@ -52,6 +93,91 @@ const TutorPage = () => {
       toast.error('Image API error: ' + (e.response?.data?.detail || e.message))
     }
     setImageLoading(false)
+  }
+
+  const toggleDictation = () => {
+    if (listening) {
+      recognitionRef.current?.stop()
+      setListening(false)
+      setInterimTranscript('')
+      return
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      toast.error('Speech dictation is not supported in this browser')
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+
+    recognition.onresult = (event) => {
+      let finalText = ''
+      let interimText = ''
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript
+        if (event.results[i].isFinal) finalText += transcript
+        else interimText += transcript
+      }
+
+      if (finalText.trim()) {
+        setForm(prev => ({
+          ...prev,
+          question: `${prev.question}${prev.question.trim() ? ' ' : ''}${finalText.trim()}`,
+        }))
+      }
+      setInterimTranscript(interimText.trim())
+    }
+
+    recognition.onerror = (event) => {
+      const message = event.error === 'not-allowed'
+        ? 'Microphone permission was blocked'
+        : `Dictation error: ${event.error}`
+      toast.error(message)
+      setListening(false)
+      setInterimTranscript('')
+    }
+
+    recognition.onend = () => {
+      setListening(false)
+      setInterimTranscript('')
+    }
+
+    recognitionRef.current = recognition
+    recognition.start()
+    setListening(true)
+  }
+
+  const uploadFiles = async (files) => {
+    const selected = Array.from(files || [])
+    if (!selected.length) return
+    if (!form.student_id.trim()) return toast.error('Please enter a Student ID first')
+
+    setUploadingDocument(true)
+    try {
+      const uploaded = []
+      for (const file of selected) {
+        const data = await uploadDocument({ studentId: form.student_id.trim(), file })
+        uploaded.push(data.document)
+      }
+      setDocuments(prev => [...uploaded, ...prev])
+      toast.success(uploaded.length === 1 ? 'Document uploaded' : `${uploaded.length} documents uploaded`)
+    } catch (e) {
+      toast.error('Upload error: ' + (e.response?.data?.detail || e.message))
+    }
+    setUploadingDocument(false)
+    setDragActive(false)
+  }
+
+  const formatBytes = (bytes) => {
+    if (!bytes) return '0 B'
+    const units = ['B', 'KB', 'MB', 'GB']
+    const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+    return `${(bytes / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`
   }
 
   return (
@@ -100,16 +226,149 @@ const TutorPage = () => {
               </div>
 
               <div style={{ marginBottom: 20 }}>
-                <label style={{ fontFamily: 'DM Sans', fontSize: 12, color: '#7B8DB0', display: 'block', marginBottom: 6 }}>Question</label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+                  <label style={{ fontFamily: 'DM Sans', fontSize: 12, color: '#7B8DB0', display: 'block' }}>Question</label>
+                  <button
+                    type="button"
+                    onClick={toggleDictation}
+                    title={listening ? 'Stop dictation' : 'Start dictation'}
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 10,
+                      border: listening ? '1px solid rgba(255,51,102,0.35)' : '1px solid rgba(0,212,255,0.25)',
+                      background: listening ? 'rgba(255,51,102,0.12)' : 'rgba(0,212,255,0.08)',
+                      color: listening ? '#FF3366' : '#00D4FF',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {listening ? <MicOff size={16} /> : <Mic size={16} />}
+                  </button>
+                </div>
                 <textarea className="edu-input" value={form.question} onChange={e => setForm(p => ({ ...p, question: e.target.value }))}
                   placeholder="Type your question here..."
                   rows={5} style={{ width: '100%', padding: '12px 14px', fontSize: 14, resize: 'vertical', lineHeight: 1.6 }} />
+                {(listening || interimTranscript) && (
+                  <div style={{
+                    marginTop: 8,
+                    minHeight: 28,
+                    padding: '7px 10px',
+                    borderRadius: 10,
+                    background: listening ? 'rgba(0,212,255,0.06)' : 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(0,212,255,0.14)',
+                    fontFamily: 'DM Sans',
+                    fontSize: 12,
+                    color: interimTranscript ? '#F0F4FF' : '#00D4FF',
+                  }}>
+                    {interimTranscript || 'Listening...'}
+                  </div>
+                )}
               </div>
 
               <button className="btn-primary" onClick={submit} disabled={loading}
                 style={{ width: '100%', padding: '13px', fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                 {loading ? <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Processing...</> : <><Send size={16} /> Submit to Pipeline</>}
               </button>
+            </GlassCard>
+
+            <GlassCard accent="blue" hover={false}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
+                <div>
+                  <h3 style={{ fontFamily: 'Syne', fontSize: 13, fontWeight: 700, color: '#7B8DB0', textTransform: 'uppercase', letterSpacing: '0.08em' }}>My Documents</h3>
+                  <p style={{ fontFamily: 'DM Sans', fontSize: 12, color: '#7B8DB0', marginTop: 4 }}>{documents.length} saved for {form.student_id || 'student'}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingDocument}
+                  style={{
+                    width: 36, height: 36, borderRadius: 10, cursor: uploadingDocument ? 'not-allowed' : 'pointer',
+                    border: '1px solid rgba(0,212,255,0.25)', background: 'rgba(0,212,255,0.08)',
+                    color: '#00D4FF', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    opacity: uploadingDocument ? 0.6 : 1,
+                  }}
+                  title="Upload documents"
+                >
+                  <UploadCloud size={17} />
+                </button>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp"
+                onChange={e => uploadFiles(e.target.files)}
+                style={{ display: 'none' }}
+              />
+
+              <div
+                onDragEnter={(e) => { e.preventDefault(); setDragActive(true) }}
+                onDragOver={(e) => { e.preventDefault(); setDragActive(true) }}
+                onDragLeave={(e) => { e.preventDefault(); setDragActive(false) }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  uploadFiles(e.dataTransfer.files)
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  minHeight: 126,
+                  borderRadius: 14,
+                  border: dragActive ? '1px solid rgba(0,212,255,0.6)' : '1px dashed rgba(0,212,255,0.25)',
+                  background: dragActive ? 'rgba(0,212,255,0.1)' : 'rgba(0,212,255,0.04)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  padding: 20,
+                  marginBottom: 14,
+                }}
+              >
+                <UploadCloud size={30} color="#00D4FF" style={{ opacity: 0.7, marginBottom: 10 }} />
+                <p style={{ fontFamily: 'Syne', fontWeight: 700, color: '#F0F4FF', fontSize: 14, marginBottom: 4 }}>
+                  {uploadingDocument ? 'Uploading...' : 'Drop files here'}
+                </p>
+                <p style={{ fontFamily: 'DM Sans', fontSize: 12, color: '#7B8DB0' }}>or click to browse documents</p>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
+                {documentsLoading && (
+                  <p style={{ fontFamily: 'DM Sans', fontSize: 12, color: '#7B8DB0', textAlign: 'center', padding: '10px 0' }}>Loading documents...</p>
+                )}
+                {!documentsLoading && documents.length === 0 && (
+                  <p style={{ fontFamily: 'DM Sans', fontSize: 12, color: '#7B8DB0', textAlign: 'center', padding: '10px 0' }}>No documents uploaded yet.</p>
+                )}
+                {documents.map(doc => (
+                  <div key={doc.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+                    borderRadius: 12, background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.07)',
+                  }}>
+                    <FileText size={16} color="#00D4FF" style={{ flexShrink: 0 }} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p title={doc.filename} style={{ fontFamily: 'Syne', fontSize: 13, fontWeight: 700, color: '#F0F4FF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.filename}</p>
+                      <p style={{ fontFamily: 'DM Sans', fontSize: 11, color: '#7B8DB0', marginTop: 2 }}>{formatBytes(doc.size)}</p>
+                    </div>
+                    <a
+                      href={getDocumentDownloadUrl(doc.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Open document"
+                      style={{
+                        width: 30, height: 30, borderRadius: 9, border: '1px solid rgba(0,212,255,0.22)',
+                        color: '#00D4FF', background: 'rgba(0,212,255,0.08)', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      }}
+                    >
+                      <Download size={14} />
+                    </a>
+                  </div>
+                ))}
+              </div>
             </GlassCard>
 
             {/* Sample prompts */}
