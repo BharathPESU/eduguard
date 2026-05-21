@@ -1,0 +1,30 @@
+# EduGuard AI — Production dependencies only
+# Heavy dev/unused packages (any-guardrail→torch, aiplatform→tensorflow, etc.)
+# are excluded — see requirements.txt for the full dev set.
+
+fastapi==0.111.0
+uvicorn==0.30.1
+pydantic>=2.10,<3
+python-dotenv==1.0.1
+
+# Database
+pymongo==4.7.2
+motor==3.4.0
+
+# HTTP
+requests==2.31.0
+httpx==0.27.0
+
+# NVIDIA NIM (OpenAI-compatible client)
+openai>=1.0.0
+
+# Auth
+supabase==2.30.0
+
+# File processing (PYQ PDF extraction)
+pymupdf==1.24.3
+pillow==10.3.0
+
+# Misc
+pyyaml==6.0.1
+python-multipart==0.0.9

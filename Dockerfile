@@ -16,8 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install Python deps first (layer cache friendly)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Use the lean production requirements (no torch/tensorflow/aiplatform)
+COPY requirements.prod.txt .
+RUN pip install --no-cache-dir -r requirements.prod.txt
 
 # Copy application source
 COPY app/       ./app/
