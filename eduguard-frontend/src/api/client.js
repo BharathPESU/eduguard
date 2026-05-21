@@ -36,7 +36,8 @@ export const tutorAsk = async (payload) => {
 }
 
 export const generateConceptImage = async (payload) => {
-  const res = await client.post('/images/concept', payload, { timeout: 120000 })
+  // NVIDIA qwen-image can take ~90 s; allow 3 min to be safe
+  const res = await client.post('/images/concept', payload, { timeout: 180000 })
   return res.data
 }
 
@@ -78,6 +79,47 @@ export const getSubmissions = async () => {
 
 export const getHealth = async () => {
   const res = await client.get('/health')
+  return res.data
+}
+
+// ── PYQ Practice ──────────────────────────────────────────
+export const pyqUpload = async (formData) => {
+  const res = await client.post('/pyq/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000, // Vertex AI extraction can take up to ~60s
+  })
+  return res.data
+}
+
+export const pyqGetSessions = async () => {
+  const res = await client.get('/pyq/sessions')
+  return res.data
+}
+
+export const pyqGetSessionDetail = async (sessionId) => {
+  // Returns session + cached_answers map {question_number: answer_text}
+  const res = await client.get(`/pyq/session/${sessionId}`)
+  return res.data
+}
+
+export const pyqGetQuestion = async (sessionId, questionNumber) => {
+  const res = await client.post('/pyq/question', {
+    session_id: sessionId,
+    question_number: questionNumber,
+  })
+  return res.data
+}
+
+export const pyqGetAnswer = async (sessionId, questionNumber) => {
+  const res = await client.post('/pyq/answer', {
+    session_id: sessionId,
+    question_number: questionNumber,
+  }, { timeout: 90000 }) // AI answer generation can take time
+  return res.data
+}
+
+export const pyqDeleteSession = async (sessionId) => {
+  const res = await client.delete(`/pyq/session/${sessionId}`)
   return res.data
 }
 

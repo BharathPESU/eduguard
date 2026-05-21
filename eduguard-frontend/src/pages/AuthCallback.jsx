@@ -6,7 +6,17 @@ const AuthCallback = () => {
   const navigate = useNavigate()
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
+    const queryParams = new URLSearchParams(window.location.search)
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const params = hashParams.get('access_token') ? hashParams : queryParams
+
+    const error = params.get('error_description') || params.get('error')
+    if (error) {
+      toast.error(error)
+      navigate('/login', { replace: true })
+      return
+    }
+
     const accessToken = params.get('access_token')
     const refreshToken = params.get('refresh_token')
     const email = params.get('email')

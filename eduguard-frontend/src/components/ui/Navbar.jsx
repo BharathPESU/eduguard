@@ -28,6 +28,7 @@ const Navbar = () => {
     { to: '/home', label: 'Home' },
     { to: '/tutor', label: 'AI Tutor' },
     { to: '/exam', label: 'Exam Validator' },
+    { to: '/pyq', label: 'PYQ Practice' },
     { to: '/dashboard', label: 'Dashboard' },
   ]
   const visibleLinks = signedIn ? links : []

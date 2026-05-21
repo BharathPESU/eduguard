@@ -46,3 +46,6 @@ storage/
 
 # Docker
 *.dockerignore
+
+# PYQ session data
+data/pyq_sessions/*.json

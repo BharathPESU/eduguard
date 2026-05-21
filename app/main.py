@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.tutor import router as tutor_router
@@ -5,12 +6,20 @@ from app.routes.exam import router as exam_router
 from app.routes.image import router as image_router
 from app.routes.documents import router as documents_router
 from app.routes.auth import router as auth_router
+from app.routes.pyq import router as pyq_router, pyq_startup
 from app.db.mongo import get_recent_violations, get_exam_submissions
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await pyq_startup()   # create indexes + sync disk sessions → MongoDB
+    yield
 
 app = FastAPI(
     title="EduGuard AI",
     description="Guardrail-Enforced AI Safety Platform for Education",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Allow requests from React dev server (5173) and any local origin
@@ -32,6 +41,7 @@ app.include_router(exam_router)
 app.include_router(image_router)
 app.include_router(documents_router)
 app.include_router(auth_router)
+app.include_router(pyq_router)
 
 
 @app.get("/")

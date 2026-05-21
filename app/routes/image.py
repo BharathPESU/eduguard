@@ -1,100 +1,146 @@
-from typing import Any
+"""
+Image generation route — uses NVIDIA qwen/qwen-image via the OpenAI-compatible
+images endpoint at https://integrate.api.nvidia.com/v1.
+
+Pipeline:
+  1. LLM (TUTOR_MODEL_ID) distils the question + tutor answer into a focused
+     educational visual prompt  (≤ 100 words, no text in image).
+  2. NVIDIA qwen/qwen-image generates the image and returns b64_json.
+  3. We return a data URI so the browser can display it without a second fetch.
+"""
+import base64
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.llm.nvidia_client import invoke_llm_async
 
 router = APIRouter(prefix="/images", tags=["images"])
 
+# ──────────────────────────────────────────────────────────
+# Request / helpers
+# ──────────────────────────────────────────────────────────
 
 class ConceptImageRequest(BaseModel):
     question: str = Field(..., min_length=3)
     subject: str = "General"
     grade_level: str = "10"
+    tutor_response: Optional[str] = None   # AI answer to summarise (optional)
 
 
-def _extract_image_urls(payload: dict[str, Any]) -> list[str]:
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    if not isinstance(data, dict):
-        return []
+_PROMPT_SYSTEM = (
+    "You are a visual-prompt engineer for educational AI. "
+    "Given a student's question and an optional tutor explanation, "
+    "write ONE concise image-generation prompt (max 80 words) that will "
+    "produce a clear, accurate, labelled educational diagram or illustration. "
+    "Rules: NO text in the image, photorealistic or clean line-art style, "
+    "grade-appropriate, single-concept focus. Output ONLY the prompt, nothing else."
+)
 
-    for key in ("image_urls", "urls"):
-        urls = data.get(key)
-        if isinstance(urls, list):
-            return [url for url in urls if isinstance(url, str)]
 
-    images = data.get("images")
-    if isinstance(images, list):
-        urls = []
-        for image in images:
-            if isinstance(image, str):
-                urls.append(image)
-            elif isinstance(image, dict) and isinstance(image.get("url"), str):
-                urls.append(image["url"])
-        return urls
+async def _build_visual_prompt(question: str, subject: str, grade: str,
+                                tutor_response: Optional[str]) -> str:
+    """Ask the LLM to summarise into a crisp visual prompt."""
+    context = f"Subject: {subject}\nGrade: {grade}\nStudent question: {question}"
+    if tutor_response:
+        # Keep it concise — first 600 chars is plenty for context
+        context += f"\nTutor explanation (excerpt): {tutor_response[:600]}"
+    try:
+        prompt = await invoke_llm_async(
+            system_prompt=_PROMPT_SYSTEM,
+            user_message=context,
+            model_id=settings.TUTOR_MODEL_ID,
+            max_tokens=150,
+        )
+        return prompt.strip()
+    except Exception:
+        # Fallback: build a prompt manually
+        return (
+            f"Educational diagram for Grade {grade} {subject}: {question}. "
+            "Clean, labeled illustration, no decorative text."
+        )
 
-    return []
 
+def _b64_to_data_uri(b64: str, mime: str = "image/png") -> str:
+    """Wrap a raw base64 string in a data URI."""
+    # NVIDIA sometimes wraps it with a data URI prefix already
+    if b64.startswith("data:"):
+        return b64
+    return f"data:{mime};base64,{b64}"
+
+
+# ──────────────────────────────────────────────────────────
+# Route
+# ──────────────────────────────────────────────────────────
 
 @router.post("/concept")
 async def generate_concept_image(request: ConceptImageRequest):
-    if not settings.MINIMAX_API_KEY:
+    if not settings.NVIDIA_API_KEY:
         raise HTTPException(
             status_code=500,
-            detail="MINIMAX_API_KEY is not configured on the server.",
+            detail="NVIDIA_API_KEY is not configured on the server.",
         )
 
-    prompt = (
-        f"Create a clear educational visual for a Grade {request.grade_level} "
-        f"{request.subject} concept. The student asked: {request.question}. "
-        "Make it accurate, beginner-friendly, photorealistic or clean diagram style, "
-        "with no distracting text, labels only when useful for understanding."
+    # Step 1 — distil question + tutor answer into a visual prompt
+    visual_prompt = await _build_visual_prompt(
+        question=request.question,
+        subject=request.subject,
+        grade=request.grade_level,
+        tutor_response=request.tutor_response,
     )
 
+    # Step 2 — call NVIDIA qwen/qwen-image (OpenAI images endpoint)
     payload = {
-        "model": settings.MINIMAX_IMAGE_MODEL,
-        "prompt": prompt,
-        "aspect_ratio": "16:9",
-        "response_format": "url",
+        "model": settings.IMAGE_MODEL_ID,
+        "prompt": visual_prompt,
         "n": 1,
-        "prompt_optimizer": True,
+        "response_format": "b64_json",
     }
 
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(
-                "https://api.minimax.io/v1/image_generation",
+        async with httpx.AsyncClient(timeout=180) as http:
+            resp = await http.post(
+                f"{settings.NVIDIA_BASE_URL}/images/generations",
                 headers={
-                    "Authorization": f"Bearer {settings.MINIMAX_API_KEY}",
+                    "Authorization": f"Bearer {settings.NVIDIA_API_KEY}",
                     "Content-Type": "application/json",
                 },
                 json=payload,
             )
-            response.raise_for_status()
+            resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        detail = exc.response.text[:500] if exc.response is not None else str(exc)
+        detail = exc.response.text[:600] if exc.response is not None else str(exc)
         raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"MiniMax request failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"NVIDIA image request failed: {exc}") from exc
 
-    data = response.json()
-    base_resp = data.get("base_resp")
-    if isinstance(base_resp, dict) and base_resp.get("status_code") not in (None, 0):
-        status_msg = base_resp.get("status_msg") or "MiniMax image generation failed."
-        status_code = 402 if "balance" in status_msg.lower() else 502
-        raise HTTPException(status_code=status_code, detail=status_msg)
+    data = resp.json()
 
-    image_urls = _extract_image_urls(data)
-    if not image_urls:
+    # Step 3 — extract image(s) from the OpenAI-compatible response
+    image_items = data.get("data", [])
+    if not image_items:
         raise HTTPException(
             status_code=502,
-            detail="MiniMax response did not include image URLs.",
+            detail="NVIDIA response did not include image data.",
+        )
+
+    images = []
+    for item in image_items:
+        b64 = item.get("b64_json") or item.get("url")
+        if b64:
+            images.append(_b64_to_data_uri(b64))
+
+    if not images:
+        raise HTTPException(
+            status_code=502,
+            detail="Could not extract images from NVIDIA response.",
         )
 
     return {
         "status": "success",
-        "prompt": prompt,
-        "images": image_urls,
+        "prompt": visual_prompt,
+        "images": images,
     }

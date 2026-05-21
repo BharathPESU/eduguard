@@ -1,7 +1,7 @@
 import asyncio
-from uuid import uuid4
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 from supabase import create_client
@@ -9,7 +9,6 @@ from supabase import create_client
 from app.config import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-oauth_code_verifiers: dict[str, str] = {}
 
 
 class AuthCredentials(BaseModel):
@@ -98,47 +97,12 @@ async def login(credentials: AuthCredentials):
 
 @router.get("/google")
 async def google_login():
-    supabase = _get_supabase()
-    state = uuid4().hex
-    response = await _run_supabase(
-        lambda: supabase.auth.sign_in_with_oauth({
-            "provider": "google",
-            "options": {
-                "redirect_to": f"{settings.BACKEND_URL}/auth/callback",
-                "query_params": {"state": state},
-            },
-        })
-    )
-    storage_key = getattr(supabase.auth, "_storage_key", "supabase.auth.token")
-    code_verifier = supabase.auth._storage.get_item(f"{storage_key}-code-verifier")
-    if code_verifier:
-        oauth_code_verifiers[state] = code_verifier
+    if not settings.SUPABASE_URL:
+        raise HTTPException(status_code=500, detail="SUPABASE_URL must be configured.")
 
-    return RedirectResponse(url=response.url, status_code=302)
-
-
-@router.get("/callback")
-async def auth_callback(code: str = Query(...), state: str | None = None):
-    supabase = _get_supabase()
-    code_verifier = oauth_code_verifiers.pop(state, None) if state else None
-    if not code_verifier:
-        raise HTTPException(status_code=400, detail="OAuth state expired. Start Google login again.")
-
-    response = await _run_supabase(
-        lambda: supabase.auth.exchange_code_for_session({
-            "auth_code": code,
-            "code_verifier": code_verifier,
-        })
-    )
-    payload = _auth_response_payload(response, "success")
-    session = payload.get("session") or {}
-    if not session.get("access_token"):
-        raise HTTPException(status_code=400, detail="Supabase did not return a session.")
-
-    redirect_url = (
-        f"{settings.FRONTEND_URL}/auth/callback"
-        f"?access_token={session['access_token']}"
-        f"&refresh_token={session.get('refresh_token') or ''}"
-        f"&email={(payload.get('user') or {}).get('email') or ''}"
-    )
-    return RedirectResponse(url=redirect_url, status_code=302)
+    query = urlencode({
+        "provider": "google",
+        "redirect_to": f"{settings.FRONTEND_URL}/auth/callback",
+    })
+    auth_url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/authorize?{query}"
+    return RedirectResponse(url=auth_url, status_code=302)

@@ -21,6 +21,7 @@ const TutorPage = () => {
   const [loading, setLoading] = useState(false)
   const [imageLoading, setImageLoading] = useState(false)
   const [conceptImages, setConceptImages] = useState([])
+  const [generatedPrompt, setGeneratedPrompt] = useState('')
   const [listening, setListening] = useState(false)
   const [interimTranscript, setInterimTranscript] = useState('')
   const [documents, setDocuments] = useState([])
@@ -81,13 +82,19 @@ const TutorPage = () => {
   const generateImage = async () => {
     if (!form.question.trim()) return toast.error('Please enter a question first')
     setImageLoading(true)
+    setConceptImages([])
+    setGeneratedPrompt('')
     try {
       const data = await generateConceptImage({
         question: form.question,
         subject: form.subject,
         grade_level: form.grade_level,
+        // Pass the tutor answer so the backend LLM can summarise it into
+        // a better visual prompt before calling qwen-image
+        tutor_response: result?.status === 'success' ? result.response : undefined,
       })
       setConceptImages(data.images || [])
+      if (data.prompt) setGeneratedPrompt(data.prompt)
       toast.success('Concept image generated')
     } catch (e) {
       toast.error('Image API error: ' + (e.response?.data?.detail || e.message))
@@ -410,33 +417,59 @@ const TutorPage = () => {
                 <button onClick={generateImage} disabled={imageLoading || !form.question.trim()}
                   style={{
                     padding: '9px 14px', borderRadius: 10, cursor: imageLoading || !form.question.trim() ? 'not-allowed' : 'pointer',
-                    background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.25)',
+                    background: result?.status === 'success'
+                      ? 'linear-gradient(135deg, rgba(0,212,255,0.18), rgba(0,255,136,0.12))'
+                      : 'rgba(0,212,255,0.1)',
+                    border: result?.status === 'success'
+                      ? '1px solid rgba(0,212,255,0.45)'
+                      : '1px solid rgba(0,212,255,0.25)',
                     color: '#00D4FF', fontFamily: 'Syne', fontWeight: 700, fontSize: 12,
                     display: 'flex', alignItems: 'center', gap: 7, opacity: imageLoading || !form.question.trim() ? 0.55 : 1,
-                    whiteSpace: 'nowrap',
+                    whiteSpace: 'nowrap', transition: 'all 0.2s',
                   }}>
                   {imageLoading ? <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> : <Sparkles size={14} />}
-                  {imageLoading ? 'Generating' : 'Generate'}
+                  {imageLoading ? 'Generating…' : result?.status === 'success' ? 'Generate from Answer' : 'Generate'}
                 </button>
               </div>
 
               {conceptImages.length > 0 ? (
                 <div style={{ display: 'grid', gap: 12 }}>
+                  {generatedPrompt && (
+                    <div style={{
+                      padding: '10px 14px', borderRadius: 10,
+                      background: 'rgba(0,212,255,0.06)', border: '1px solid rgba(0,212,255,0.15)',
+                      fontFamily: 'DM Sans', fontSize: 12, color: '#7B8DB0', lineHeight: 1.5,
+                    }}>
+                      <span style={{ color: '#00D4FF', fontWeight: 700 }}>AI Prompt: </span>
+                      {generatedPrompt}
+                    </div>
+                  )}
                   {conceptImages.map((src, index) => (
                     <img
-                      key={src}
+                      key={index}
                       src={src}
                       alt={`Generated concept visual ${index + 1}`}
                       style={{
                         width: '100%',
-                        aspectRatio: '16 / 9',
-                        objectFit: 'cover',
+                        aspectRatio: '1 / 1',
+                        objectFit: 'contain',
                         borderRadius: 14,
                         border: '1px solid rgba(0,212,255,0.18)',
                         background: 'rgba(255,255,255,0.04)',
                       }}
                     />
                   ))}
+                </div>
+              ) : imageLoading ? (
+                <div style={{
+                  minHeight: 180, borderRadius: 14, border: '1px dashed rgba(0,212,255,0.24)',
+                  background: 'linear-gradient(135deg, rgba(0,212,255,0.06), rgba(0,255,136,0.04))',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  textAlign: 'center', padding: 24, gap: 12,
+                }}>
+                  <div style={{ width: 44, height: 44, borderRadius: '50%', border: '3px solid rgba(0,212,255,0.2)', borderTop: '3px solid #00D4FF', animation: 'spin 1s linear infinite' }} />
+                  <p style={{ fontFamily: 'Syne', fontWeight: 700, color: '#00D4FF', marginBottom: 4 }}>Generating Image</p>
+                  <p style={{ fontFamily: 'DM Sans', fontSize: 12, color: '#7B8DB0' }}>Step 1: Summarising answer → Step 2: NVIDIA qwen-image</p>
                 </div>
               ) : (
                 <div style={{

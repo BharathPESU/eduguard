@@ -7,6 +7,7 @@ import ExamPage from './pages/ExamPage'
 import Dashboard from './pages/Dashboard'
 import AuthPage from './pages/AuthPage'
 import AuthCallback from './pages/AuthCallback'
+import PYQPage from './pages/PYQPage'
 
 const isSignedIn = () => Boolean(localStorage.getItem('eduguard_access_token'))
 
@@ -52,6 +53,7 @@ const App = () => {
         <Route path="/tutor" element={<ProtectedRoute><TutorPage /></ProtectedRoute>} />
         <Route path="/exam" element={<ProtectedRoute><ExamPage /></ProtectedRoute>} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="/pyq" element={<ProtectedRoute><PYQPage /></ProtectedRoute>} />
         <Route path="/login" element={<PublicAuthRoute><AuthPage mode="login" /></PublicAuthRoute>} />
         <Route path="/signup" element={<PublicAuthRoute><AuthPage mode="signup" /></PublicAuthRoute>} />
         <Route path="/auth/callback" element={<AuthCallback />} />
