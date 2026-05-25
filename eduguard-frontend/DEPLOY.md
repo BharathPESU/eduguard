@@ -1,16 +1,18 @@
 # Frontend CI/CD (branch `frontend`)
 
-Pushing to the **`frontend`** branch automatically builds the Docker image and deploys it to **Cloud Run** via GitHub Actions and Cloud Build.
+Pushing to the **`frontend`** branch automatically builds the Docker image and deploys it to **Cloud Run** via GitHub Actions.
 
 ## Flow
 
 ```text
 git push origin frontend
   → GitHub Actions (.github/workflows/deploy-frontend.yml)
-  → gcloud builds submit (eduguard-frontend/cloudbuild.yaml)
-  → Docker build + push to Artifact Registry
+  → docker build (on GitHub runner)
+  → docker push → Artifact Registry
   → gcloud run deploy
 ```
+
+(`eduguard-frontend/cloudbuild.yaml` is only for optional manual deploys from your laptop.)
 
 Only changes under `eduguard-frontend/` (or the workflow file) trigger a deploy.
 
@@ -18,21 +20,31 @@ Only changes under `eduguard-frontend/` (or the workflow file) trigger a deploy.
 
 ### 1. Service account
 
-Create a service account (e.g. `github-actions-deploy`) in project `career-492408` with:
+Create a service account (e.g. `github-actions-deploy`) in project `career-492408` with **only these roles**:
 
 | Role | Why |
 |------|-----|
-| `roles/cloudbuild.builds.editor` | Submit Cloud Build jobs |
-| `roles/run.admin` | Deploy Cloud Run |
-| `roles/artifactregistry.writer` | Push images |
-| `roles/iam.serviceAccountUser` | Act as the Cloud Run runtime SA |
-| `roles/storage.objectAdmin` | Upload source to the Cloud Build staging bucket |
-| `roles/serviceusage.serviceUsageConsumer` | Use enabled GCP APIs |
+| **Cloud Run Admin** (`roles/run.admin`) | Deploy the frontend service |
+| **Artifact Registry Writer** (`roles/artifactregistry.writer`) | Push Docker images |
+| **Service Account User** (`roles/iam.serviceAccountUser`) | Run as Cloud Run’s runtime service account |
 
-Cloud Build’s default service account also needs permission to deploy to Cloud Run. In **IAM**, grant the Cloud Build service account (`PROJECT_NUMBER@cloudbuild.gserviceaccount.com`):
+You do **not** need Cloud Build Editor or Storage access for GitHub Actions (the workflow builds Docker on GitHub, not in Cloud Build).
 
-- `roles/run.admin`
-- `roles/iam.serviceAccountUser`
+**Console:** IAM → select `github-actions-deploy@...` → **Edit** → remove extra roles if you added Cloud Build / Storage earlier → keep only the three above.
+
+**Terminal:**
+
+```bash
+PROJECT=career-492408
+SA="github-actions-deploy@${PROJECT}.iam.gserviceaccount.com"
+
+for ROLE in roles/run.admin roles/artifactregistry.writer roles/iam.serviceAccountUser; do
+  gcloud projects add-iam-policy-binding "${PROJECT}" \
+    --member="serviceAccount:${SA}" \
+    --role="${ROLE}" \
+    --condition=None
+done
+```
 
 ### 2. Artifact Registry
 
@@ -116,7 +128,7 @@ You should see JSON like `{"status":"ok"}` or similar from EduGuard.
 
 ### Part 2 — Set `GCP_SA_KEY` (Google deploy key)
 
-**What it is:** A JSON file that proves to Google “GitHub Actions is allowed to run Cloud Build and deploy Cloud Run.” You create it once and paste the whole file into GitHub.
+**What it is:** A JSON file that proves to Google “GitHub Actions is allowed to push images and deploy Cloud Run.” You create it once and paste the whole file into GitHub.
 
 **Step 1 — Open IAM service accounts**
 
@@ -134,14 +146,15 @@ You should see JSON like `{"status":"ok"}` or similar from EduGuard.
 
 Click **Create and continue**.
 
-**Step 3 — Grant roles** (click **Add another role** for each)
+**Step 3 — Grant roles** (click **Add another role** for each — only these three)
 
 | Role | Why |
 |------|-----|
-| Cloud Build Editor | Start builds |
 | Cloud Run Admin | Deploy the frontend service |
 | Artifact Registry Writer | Push Docker images |
 | Service Account User | Use Cloud Run’s runtime account |
+
+Do **not** add Cloud Build Editor or Storage roles (not needed).
 
 Click **Continue** → **Done** (skip granting users access).
 
@@ -152,25 +165,7 @@ Click **Continue** → **Done** (skip granting users access).
 3. Type: **JSON** → **Create**
 4. A `.json` file downloads — **keep it private** (like a password). Do not commit it to git.
 
-**Step 5 — Allow Cloud Build to deploy** (one-time, easy to miss)
-
-Cloud Build runs the deploy step using Google’s build robot account:
-
-1. **IAM & Admin** → **IAM**
-2. Find principal: `PROJECT_NUMBER@cloudbuild.gserviceaccount.com`  
-   (replace `PROJECT_NUMBER` — on IAM page you see numbers like `123456789012@cloudbuild...`)
-3. Click **Edit** (pencil) → **Add another role**:
-   - **Cloud Run Admin**
-   - **Service Account User**
-4. **Save**
-
-To find `PROJECT_NUMBER`: **IAM & Admin** → **Settings**, or run:
-
-```bash
-gcloud projects describe career-492408 --format='value(projectNumber)'
-```
-
-**Step 6 — Add secret in GitHub**
+**Step 5 — Add secret in GitHub**
 
 1. Open the downloaded `.json` in a text editor (Notepad, VS Code, etc.)
 2. Select **all** text — it starts with `{` and ends with `}`
@@ -194,7 +189,7 @@ You will never see this value again in GitHub after saving — that is normal.
 
 - [ ] `VITE_API_URL` opens `/health` in browser
 - [ ] `GCP_SA_KEY` is the full JSON (not just the filename)
-- [ ] Cloud Build service account has Run Admin + Service Account User
+- [ ] `github-actions-deploy` has only Run Admin + Artifact Registry Writer + SA User
 - [ ] Workflow file exists on `frontend` branch (merge/push the CI/CD commit)
 
 ---
@@ -242,6 +237,6 @@ gcloud builds submit . \
 | `Missing GCP_SA_KEY` | Add secrets in GitHub (see above) |
 | Cloud Build `PERMISSION_DENIED` on deploy | Grant Cloud Build SA `run.admin` + `iam.serviceAccountUser` |
 | `Unable to read file [cloudbuild.yaml]` | Fixed in workflow: use `--config=eduguard-frontend/cloudbuild.yaml` |
-| `forbidden from accessing the bucket ..._cloudbuild` | Add `Storage Object Admin` to `github-actions-deploy` SA |
+| `forbidden from accessing the bucket ..._cloudbuild` | Workflow no longer uses Cloud Build; pull latest workflow. Ensure SA has only Run Admin + Artifact Registry Writer + SA User |
 | Wrong API URL in browser | Update `VITE_API_URL` secret and push again (value is baked in at build time) |
 | Wrong Cloud Run service | Set `CLOUD_RUN_SERVICE` variable to your actual service name |
