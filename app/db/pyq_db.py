@@ -18,7 +18,10 @@ import json
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.config import settings
 
-_client = AsyncIOMotorClient(settings.MONGO_URI)
+_client = AsyncIOMotorClient(
+    settings.MONGO_URI,
+    serverSelectionTimeoutMS=5000,
+)
 _db = _client[settings.DB_NAME]
 
 pyq_sessions_col = _db["pyq_sessions"]

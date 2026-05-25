@@ -3,7 +3,10 @@ from app.config import settings
 from datetime import datetime
 from bson import ObjectId
 
-client = AsyncIOMotorClient(settings.MONGO_URI)
+client = AsyncIOMotorClient(
+    settings.MONGO_URI,
+    serverSelectionTimeoutMS=5000,
+)
 db = client[settings.DB_NAME]
 
 tutor_logs = db["tutor_logs"]

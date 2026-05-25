@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -19,9 +21,16 @@ from app.routes.pyq import router as pyq_router
 from app.routes.tutor import router as tutor_router
 
 
+logger = logging.getLogger("eduguard")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await pyq_startup()   # create indexes + sync disk sessions → MongoDB
+    # Do not block Cloud Run startup if MongoDB is slow or unreachable
+    try:
+        await asyncio.wait_for(pyq_startup(), timeout=15.0)
+    except Exception as exc:
+        logger.warning("PYQ startup skipped (app will still serve /health): %s", exc)
     yield
 
 

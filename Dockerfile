@@ -27,8 +27,8 @@ COPY rules/     ./rules/
 # Create runtime directories (PYQ sessions backup folder)
 RUN mkdir -p data/pyq_sessions storage/documents
 
-# Cloud Run injects PORT env var; default to 8000 for local
-ENV PORT=8000
+# Cloud Run sets PORT=8080; local: docker run -e PORT=8000 -p 8000:8000 ...
+ENV PORT=8080
 ENV PYQ_SESSIONS_DIR=/app/data/pyq_sessions
 
 # Non-root user for security
@@ -38,4 +38,5 @@ USER appuser
 
 EXPOSE 8080
 
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
+# Shell form so Cloud Run's PORT is expanded; exec replaces sh with uvicorn (PID 1)
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
