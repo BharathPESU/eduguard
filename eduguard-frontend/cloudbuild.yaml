@@ -1,5 +1,5 @@
 # Cloud Build: docker build → Artifact Registry → Cloud Run deploy
-# Triggered by .github/workflows/deploy-frontend.yml on push to branch `frontend`.
+# Triggered by .github/workflows/deploy-frontend.yml on push to branch `main`.
 
 steps:
   - id: build

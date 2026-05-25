@@ -9,7 +9,7 @@ name: Deploy Frontend
 on:
   push:
     branches:
-      - frontend
+      - main
     paths:
       - 'eduguard-frontend/**'
       - '.github/workflows/deploy-frontend.yml'

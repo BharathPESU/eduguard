@@ -1,11 +1,11 @@
-# Frontend CI/CD (branch `frontend`)
+# Frontend CI/CD (branch `main`)
 
-Pushing to the **`frontend`** branch automatically builds the Docker image and deploys it to **Cloud Run** via GitHub Actions.
+Pushing to the **`main`** branch automatically builds the Docker image and deploys it to **Cloud Run** via GitHub Actions.
 
 ## Flow
 
 ```text
-git push origin frontend
+git push origin main
   → GitHub Actions (.github/workflows/deploy-frontend.yml)
   → docker build (on GitHub runner)
   → docker push → Artifact Registry
@@ -181,7 +181,7 @@ You will never see this value again in GitHub after saving — that is normal.
 
 ### Part 3 — Verify
 
-1. Push any small change under `eduguard-frontend/` to branch **`frontend`**
+1. Push any small change under `eduguard-frontend/` to branch **`main`**
 2. On GitHub: **Actions** tab → workflow **Deploy Frontend**
 3. Green check = deployed; red X = open the failed step log
 
@@ -190,7 +190,7 @@ You will never see this value again in GitHub after saving — that is normal.
 - [ ] `VITE_API_URL` opens `/health` in browser
 - [ ] `GCP_SA_KEY` is the full JSON (not just the filename)
 - [ ] `github-actions-deploy` has only Run Admin + Artifact Registry Writer + SA User
-- [ ] Workflow file exists on `frontend` branch (merge/push the CI/CD commit)
+- [ ] Workflow file exists on `main` branch (merge/push the CI/CD commit)
 
 ---
 
@@ -233,7 +233,7 @@ gcloud builds submit . \
 
 | Symptom | Fix |
 |---------|-----|
-| Workflow skipped | Push must be on branch `frontend` and touch `eduguard-frontend/**` |
+| Workflow skipped | Push must be on branch `main` and touch `eduguard-frontend/**` |
 | `Missing GCP_SA_KEY` | Add secrets in GitHub (see above) |
 | Cloud Build `PERMISSION_DENIED` on deploy | Grant Cloud Build SA `run.admin` + `iam.serviceAccountUser` |
 | `Unable to read file [cloudbuild.yaml]` | Fixed in workflow: use `--config=eduguard-frontend/cloudbuild.yaml` |
