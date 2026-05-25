@@ -1,0 +1,166 @@
+# Deploy backend + frontend to Cloud Run on every push to main.
+# Builds Docker on GitHub Actions (no Cloud Build staging bucket).
+#
+# Required secret: GCP_SA_KEY
+# Optional secret: VITE_API_URL (if set, overrides auto-detected backend URL for frontend build)
+# Optional vars: GCP_PROJECT_ID, GCP_REGION, BACKEND_SERVICE, FRONTEND_SERVICE
+# Guide: eduguard-frontend/DEPLOY.md
+
+name: Deploy EduGuard
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-eduguard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-backend:
+    name: Backend → Cloud Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID != '' && secrets.GCP_PROJECT_ID || 'career-492408' }}
+      GCP_REGION: ${{ vars.GCP_REGION != '' && vars.GCP_REGION || 'us-central1' }}
+      BACKEND_SERVICE: ${{ vars.BACKEND_SERVICE != '' && vars.BACKEND_SERVICE || 'eduguard-backend' }}
+      BACKEND_IMAGE_REPO: us-central1-docker.pkg.dev/career-492408/eduguard/backend
+
+    outputs:
+      backend_url: ${{ steps.backend_url.outputs.url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate GCP secret
+        run: |
+          if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
+            echo "::error::Missing GitHub secret GCP_SA_KEY. See eduguard-frontend/DEPLOY.md"
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and push backend image
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          IMAGE_TAG="${BACKEND_IMAGE_REPO}:${SHORT_SHA}"
+          echo "Building backend ${IMAGE_TAG}"
+          docker build \
+            -t "${IMAGE_TAG}" \
+            -t "${BACKEND_IMAGE_REPO}:latest" \
+            -f Dockerfile \
+            .
+          docker push "${IMAGE_TAG}"
+          docker push "${BACKEND_IMAGE_REPO}:latest"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> "${GITHUB_ENV}"
+
+      - name: Deploy backend to Cloud Run
+        run: |
+          set -euo pipefail
+          gcloud run deploy "${BACKEND_SERVICE}" \
+            --image="${IMAGE_TAG}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=8080 \
+            --quiet
+
+      - name: Resolve backend URL
+        id: backend_url
+        run: |
+          URL=$(gcloud run services describe "${BACKEND_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format='value(status.url)')
+          echo "Backend URL: ${URL}"
+          echo "url=${URL}" >> "${GITHUB_OUTPUT}"
+
+  deploy-frontend:
+    name: Frontend → Cloud Run
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID != '' && secrets.GCP_PROJECT_ID || 'career-492408' }}
+      GCP_REGION: ${{ vars.GCP_REGION != '' && vars.GCP_REGION || 'us-central1' }}
+      FRONTEND_SERVICE: ${{ vars.FRONTEND_SERVICE != '' && vars.FRONTEND_SERVICE || 'eduguard-frontend' }}
+      FRONTEND_IMAGE_REPO: us-central1-docker.pkg.dev/career-492408/eduguard/frontend
+      # Use secret if provided; otherwise URL from backend job just deployed
+      VITE_API_URL: ${{ secrets.VITE_API_URL != '' && secrets.VITE_API_URL || needs.deploy-backend.outputs.backend_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and push frontend image
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          IMAGE_TAG="${FRONTEND_IMAGE_REPO}:${SHORT_SHA}"
+          echo "Building frontend ${IMAGE_TAG}"
+          echo "VITE_API_URL=${VITE_API_URL}"
+          docker build \
+            --build-arg "VITE_API_URL=${VITE_API_URL}" \
+            -t "${IMAGE_TAG}" \
+            -t "${FRONTEND_IMAGE_REPO}:latest" \
+            ./eduguard-frontend
+          docker push "${IMAGE_TAG}"
+          docker push "${FRONTEND_IMAGE_REPO}:latest"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> "${GITHUB_ENV}"
+
+      - name: Deploy frontend to Cloud Run
+        run: |
+          set -euo pipefail
+          gcloud run deploy "${FRONTEND_SERVICE}" \
+            --image="${IMAGE_TAG}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=8080 \
+            --quiet
+
+      - name: Print URLs
+        run: |
+          echo "Backend:  ${{ needs.deploy-backend.outputs.backend_url }}"
+          FRONTEND_URL=$(gcloud run services describe "${FRONTEND_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format='value(status.url)')
+          echo "Frontend: ${FRONTEND_URL}"

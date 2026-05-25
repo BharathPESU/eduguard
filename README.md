@@ -304,9 +304,9 @@ pytest tests/
 
 ### Frontend (Cloud Run, auto-deploy)
 
-Pushes to the **`main`** branch build and deploy the React app via GitHub Actions → Artifact Registry → Cloud Run.
+Pushes to the **`main`** branch build and deploy **backend + frontend** via GitHub Actions → Artifact Registry → Cloud Run (`.github/workflows/deploy.yml`).
 
-See **[eduguard-frontend/DEPLOY.md](eduguard-frontend/DEPLOY.md)** for one-time GCP + GitHub secrets setup (`GCP_SA_KEY`, `VITE_API_URL`).
+See **[eduguard-frontend/DEPLOY.md](eduguard-frontend/DEPLOY.md)** for one-time GCP + GitHub secrets setup (`GCP_SA_KEY`).
 
 ### Backend (Docker)
 

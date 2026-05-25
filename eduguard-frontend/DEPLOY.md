@@ -1,20 +1,21 @@
-# Frontend CI/CD (branch `main`)
+# EduGuard CI/CD (branch `main`)
 
-Pushing to the **`main`** branch automatically builds the Docker image and deploys it to **Cloud Run** via GitHub Actions.
+Pushing to the **`main`** branch automatically **builds and deploys both backend and frontend** to Cloud Run.
+
+Workflow file: **`.github/workflows/deploy.yml`**
 
 ## Flow
 
 ```text
 git push origin main
-  → GitHub Actions (.github/workflows/deploy-frontend.yml)
-  → docker build (on GitHub runner)
-  → docker push → Artifact Registry
-  → gcloud run deploy
+  → GitHub Actions "Deploy EduGuard"
+  → Job 1: Backend  — docker build (repo root) → Artifact Registry → Cloud Run (eduguard-backend)
+  → Job 2: Frontend — docker build (eduguard-frontend/) using live backend URL → Cloud Run (eduguard-frontend)
 ```
 
-(`eduguard-frontend/cloudbuild.yaml` is only for optional manual deploys from your laptop.)
+Any file change on `main` triggers **both** deploys (backend always runs first; frontend uses the backend URL from that deploy).
 
-Only changes under `eduguard-frontend/` (or the workflow file) trigger a deploy.
+(`eduguard-frontend/cloudbuild.yaml` is only for optional manual frontend deploys from your laptop.)
 
 ## One-time GCP setup
 
@@ -73,16 +74,16 @@ GitHub Actions needs two passwords so it can talk to Google Cloud and bake your 
 
 | Secret | Plain English |
 |--------|----------------|
-| `VITE_API_URL` | The **public URL of your FastAPI backend** in production (where tutor/exam/auth APIs live). |
-| `GCP_SA_KEY` | A **Google Cloud login file** (JSON) that lets GitHub trigger builds and deploys. |
+| `GCP_SA_KEY` | **Required.** Google Cloud JSON key so GitHub can push images and deploy Cloud Run. |
+| `VITE_API_URL` | **Optional.** Backend URL for the React build; auto-detected from backend deploy if omitted. |
 
 ---
 
-### Part 1 — Set `VITE_API_URL` (your backend URL)
+### Part 1 — `VITE_API_URL` (optional)
 
-**What it is:** When you run locally, the frontend calls `http://localhost:8000`. In production, the built React app must know the real backend URL. That URL is stored in `VITE_API_URL` at **build time** (it is not read from `.env` on the server later).
+**What it is:** The frontend build needs your backend URL. The workflow **sets this automatically** after deploying the backend. You only need a GitHub secret if you want to override that URL.
 
-**Step 1 — Find your backend URL**
+**To set manually (optional) — find your backend URL**
 
 Pick the option that matches you:
 
@@ -181,13 +182,13 @@ You will never see this value again in GitHub after saving — that is normal.
 
 ### Part 3 — Verify
 
-1. Push any small change under `eduguard-frontend/` to branch **`main`**
-2. On GitHub: **Actions** tab → workflow **Deploy Frontend**
+1. Push any commit to branch **`main`**
+2. On GitHub: **Actions** tab → workflow **Deploy EduGuard**
 3. Green check = deployed; red X = open the failed step log
 
 **Checklist**
 
-- [ ] `VITE_API_URL` opens `/health` in browser
+- [ ] Backend `/health` works on Cloud Run URL (after deploy)
 - [ ] `GCP_SA_KEY` is the full JSON (not just the filename)
 - [ ] `github-actions-deploy` has only Run Admin + Artifact Registry Writer + SA User
 - [ ] Workflow file exists on `main` branch (merge/push the CI/CD commit)
@@ -203,7 +204,7 @@ In **Settings → Secrets and variables → Actions**:
 | Name | Example / notes |
 |------|-----------------|
 | `GCP_SA_KEY` | Full JSON key for the deploy service account |
-| `VITE_API_URL` | `https://your-backend-xxxxx.run.app` (no trailing slash) |
+| `VITE_API_URL` | Optional. Auto-set from deployed backend URL. Override only if needed. |
 
 ### Secrets (optional)
 
@@ -215,7 +216,8 @@ In **Settings → Secrets and variables → Actions**:
 
 | Name | Default |
 |------|---------|
-| `CLOUD_RUN_SERVICE` | `eduguard-frontend` |
+| `FRONTEND_SERVICE` | `eduguard-frontend` |
+| `BACKEND_SERVICE` | `eduguard-backend` |
 | `GCP_REGION` | `us-central1` |
 
 ## Manual deploy (without GitHub)
@@ -233,7 +235,7 @@ gcloud builds submit . \
 
 | Symptom | Fix |
 |---------|-----|
-| Workflow skipped | Push must be on branch `main` and touch `eduguard-frontend/**` |
+| Workflow skipped | Push must be on branch `main` |
 | `Missing GCP_SA_KEY` | Add secrets in GitHub (see above) |
 | Cloud Build `PERMISSION_DENIED` on deploy | Grant Cloud Build SA `run.admin` + `iam.serviceAccountUser` |
 | `Unable to read file [cloudbuild.yaml]` | Fixed in workflow: use `--config=eduguard-frontend/cloudbuild.yaml` |
