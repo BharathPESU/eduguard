@@ -1,25 +1,44 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from app.models.request_models import ExamRequest
 from app.guardrails.injection import check_grade_injection
 from app.llm.plagiarism_llm import detect_plagiarism
 from app.llm.grader_llm import grade_answer
 from app.db.mongo import log_exam_submission, log_violation
+from app.auth.dependencies import get_current_user
+from app.limiter import limiter
 
 router = APIRouter(prefix="/exam", tags=["Exam Validator"])
 
+
+def _assert_owns(user: dict, student_id: str) -> None:
+    if user.get("sub", "") != student_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. student_id must match your account.",
+        )
+
+
 @router.post("/validate")
-async def validate_exam(request: ExamRequest):
+@limiter.limit("20/minute")
+async def validate_exam(
+    request: Request,
+    body: ExamRequest,
+    user: dict = Depends(get_current_user),
+):
+    # IDOR fix — only the owning student can submit under their ID
+    _assert_owns(user, body.student_id)
+
     stages_passed = []
 
     # Stage 1: Injection check
-    injection_result = check_grade_injection(request.student_answer)
+    injection_result = check_grade_injection(body.student_answer)
     if not injection_result.passed:
         await log_violation({
-            "student_id": request.student_id,
-            "exam_id": request.exam_id,
+            "student_id": body.student_id,
+            "exam_id": body.exam_id,
             "type": injection_result.rule_triggered,
             "severity": injection_result.severity,
-            "input": request.student_answer,
+            "input": body.student_answer,
             "endpoint": "/exam/validate"
         })
         return {
@@ -34,17 +53,17 @@ async def validate_exam(request: ExamRequest):
 
     # Stage 2: Plagiarism detection
     plagiarism_result = await detect_plagiarism(
-        student_answer=request.student_answer,
-        grade_level=request.grade_level
+        student_answer=body.student_answer,
+        grade_level=body.grade_level
     )
     stages_passed.append("plagiarism_detection")
 
     # Stage 3: Grade the answer
     try:
         grading_result = await grade_answer(
-            question=request.question,
-            rubric=request.rubric,
-            student_answer=request.student_answer
+            question=body.question,
+            rubric=body.rubric,
+            student_answer=body.student_answer
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Grading error: {str(e)}")
@@ -52,10 +71,10 @@ async def validate_exam(request: ExamRequest):
 
     # Save full submission
     await log_exam_submission({
-        "student_id": request.student_id,
-        "exam_id": request.exam_id,
-        "question": request.question,
-        "student_answer": request.student_answer,
+        "student_id": body.student_id,
+        "exam_id": body.exam_id,
+        "question": body.question,
+        "student_answer": body.student_answer,
         "security": {
             "injection_attempt": False,
             "plagiarism_suspected": plagiarism_result.get("plagiarism_suspected"),
@@ -69,8 +88,8 @@ async def validate_exam(request: ExamRequest):
 
     return {
         "status": "success",
-        "student_id": request.student_id,
-        "exam_id": request.exam_id,
+        "student_id": body.student_id,
+        "exam_id": body.exam_id,
         "stages_passed": stages_passed,
         "security": {
             "injection_attempt": False,

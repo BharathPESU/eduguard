@@ -4,15 +4,17 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.db.mongo import (
     get_document_by_id,
     get_student_documents,
     save_document_metadata,
 )
+from app.limiter import limiter
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -55,11 +57,27 @@ async def _write_bytes(path: Path, content: bytes) -> None:
     await asyncio.to_thread(path.write_bytes, content)
 
 
+def _assert_owns(user: dict, student_id: str) -> None:
+    """Raise 403 if the authenticated user is not the document owner."""
+    user_id = user.get("sub", "")
+    if user_id != student_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. You can only access your own documents.",
+        )
+
+
 @router.post("/upload")
+@limiter.limit("20/minute")
 async def upload_document(
+    request: Request,
     student_id: str = Form(...),
     file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
 ):
+    # IDOR fix — enforce ownership
+    _assert_owns(user, student_id)
+
     original_name = _safe_filename(file.filename or "document")
     extension = Path(original_name).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
@@ -104,16 +122,27 @@ async def upload_document(
 
 
 @router.get("")
-async def list_documents(student_id: str):
+async def list_documents(
+    student_id: str,
+    user: dict = Depends(get_current_user),
+):
+    # IDOR fix — users can only list their own documents
+    _assert_owns(user, student_id)
     docs = await get_student_documents(student_id)
     return [_document_response(doc) for doc in docs]
 
 
 @router.get("/{document_id}/download")
-async def download_document(document_id: str):
+async def download_document(
+    document_id: str,
+    user: dict = Depends(get_current_user),
+):
     doc = await get_document_by_id(document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
+
+    # IDOR fix — verify the requesting user owns this document
+    _assert_owns(user, doc["student_id"])
 
     path = Path(doc["storage_path"])
     if not path.exists():

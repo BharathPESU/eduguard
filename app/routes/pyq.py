@@ -3,7 +3,7 @@ PYQ (Previous Year Questions) FastAPI router — MongoDB-first.
 
 Flow:
   1. POST /pyq/upload  → Agent 1 extracts all questions → saved to disk + MongoDB
-  2. GET  /pyq/sessions         → list from MongoDB
+  2. GET  /pyq/sessions         → list from MongoDB (user's own sessions)
   3. GET  /pyq/session/{id}     → full session from MongoDB (questions + cached answers)
   4. POST /pyq/question         → single question from MongoDB + cached answer if exists
   5. POST /pyq/answer           → check MongoDB cache first; generate only if missing → store
@@ -12,12 +12,13 @@ Flow:
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 
 from app.agents.pyq_extractor import extract_questions_from_file
 from app.agents.pyq_session_manager import delete_session as delete_from_disk
 from app.agents.pyq_answering import answer_question
 from app.models.pyq_models import PYQQuestionRequest, PYQAnswerRequest
+from app.auth.dependencies import get_current_user
 from app.db.pyq_db import (
     ensure_indexes,
     migrate_disk_sessions,
@@ -29,6 +30,8 @@ from app.db.pyq_db import (
     save_answer,
     get_all_answers_for_session,
 )
+
+from app.limiter import limiter
 
 router = APIRouter(prefix="/pyq", tags=["PYQ Practice"])
 
@@ -69,10 +72,13 @@ async def _load_session(session_id: str) -> dict:
 # ── Endpoints ─────────────────────────────────────────────
 
 @router.post("/upload")
+@limiter.limit("5/minute")
 async def upload_question_paper(
+    request: Request,
     file: UploadFile = File(...),
     subject: str = Form(default="Unknown"),
     year: str = Form(default="Unknown"),
+    user: dict = Depends(get_current_user),
 ):
     """
     Upload a PDF or image question paper.
@@ -101,7 +107,8 @@ async def upload_question_paper(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 
-    # Always save to MongoDB right after extraction
+    # Always save to MongoDB — store owner for access control
+    session["owner_id"] = user.get("sub", "")
     await save_session(session)
 
     return {
@@ -119,19 +126,25 @@ async def upload_question_paper(
 
 
 @router.get("/sessions")
-async def list_sessions_route():
-    """List all sessions from MongoDB, newest first."""
-    sessions = await list_sessions()
+async def list_sessions_route(user: dict = Depends(get_current_user)):
+    """List sessions owned by the authenticated user."""
+    sessions = await list_sessions(owner_id=user.get("sub", ""))
     return {"sessions": sessions, "total": len(sessions)}
 
 
 @router.get("/session/{session_id}")
-async def get_session_detail(session_id: str):
+async def get_session_detail(
+    session_id: str,
+    user: dict = Depends(get_current_user),
+):
     """
     Return full session (all questions) + map of all already-generated answers.
     Frontend uses cached_answers to pre-populate answers without extra calls.
     """
     session = await _load_session(session_id)
+    # IDOR fix — only the session owner can read it
+    if session.get("owner_id") and session["owner_id"] != user.get("sub", ""):
+        raise HTTPException(status_code=403, detail="Access denied.")
     cached = await get_all_answers_for_session(session_id)
     return {
         "session_id": session["session_id"],
@@ -146,7 +159,10 @@ async def get_session_detail(session_id: str):
 
 
 @router.post("/question")
-async def get_question(req: PYQQuestionRequest):
+async def get_question(
+    req: PYQQuestionRequest,
+    user: dict = Depends(get_current_user),
+):
     """
     Fetch a single question from MongoDB by 1-based question_number.
     Also returns the cached answer if one exists, so the frontend can
@@ -179,7 +195,12 @@ async def get_question(req: PYQQuestionRequest):
 
 
 @router.post("/answer")
-async def get_answer(req: PYQAnswerRequest):
+@limiter.limit("20/minute")
+async def get_answer(
+    request: Request,
+    req: PYQAnswerRequest,
+    user: dict = Depends(get_current_user),
+):
     """
     Answer a specific question.
 
@@ -248,8 +269,14 @@ async def get_answer(req: PYQAnswerRequest):
 
 
 @router.delete("/session/{session_id}")
-async def delete_session_route(session_id: str):
+async def delete_session_route(
+    session_id: str,
+    user: dict = Depends(get_current_user),
+):
     """Delete a session and all its cached answers from MongoDB and disk."""
+    session = await get_session_db(session_id)
+    if session and session.get("owner_id") and session["owner_id"] != user.get("sub", ""):
+        raise HTTPException(status_code=403, detail="Access denied.")
     db_ok   = await delete_session_db(session_id)
     disk_ok = delete_from_disk(session_id)
     if db_ok or disk_ok:

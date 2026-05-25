@@ -1,12 +1,13 @@
 import asyncio
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 from supabase import create_client
 
 from app.config import settings
+from app.limiter import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -67,7 +68,8 @@ async def _run_supabase(callable_):
 
 
 @router.post("/signup")
-async def signup(credentials: AuthCredentials):
+@limiter.limit("10/minute")
+async def signup(request: Request, credentials: AuthCredentials):
     supabase = _get_supabase()
     response = await _run_supabase(
         lambda: supabase.auth.sign_up({
@@ -84,7 +86,8 @@ async def signup(credentials: AuthCredentials):
 
 
 @router.post("/login")
-async def login(credentials: AuthCredentials):
+@limiter.limit("10/minute")
+async def login(request: Request, credentials: AuthCredentials):
     supabase = _get_supabase()
     response = await _run_supabase(
         lambda: supabase.auth.sign_in_with_password({

@@ -33,8 +33,10 @@ class Settings:
 
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
+    SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "")  # Settings → API → JWT Secret
     BACKEND_URL: str = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    APP_ENV: str = os.getenv("APP_ENV", "development")
 
     # Vertex AI / Google Cloud (PYQ feature)
     GOOGLE_APPLICATION_CREDENTIALS_JSON: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON", "")

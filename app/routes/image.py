@@ -12,8 +12,11 @@ import base64
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+
+from app.auth.dependencies import get_current_user
+from app.limiter import limiter
 
 from app.config import settings
 from app.llm.nvidia_client import invoke_llm_async
@@ -77,7 +80,12 @@ def _b64_to_data_uri(b64: str, mime: str = "image/png") -> str:
 # ──────────────────────────────────────────────────────────
 
 @router.post("/concept")
-async def generate_concept_image(request: ConceptImageRequest):
+@limiter.limit("5/minute")
+async def generate_concept_image(
+    request: Request,
+    body: ConceptImageRequest,
+    user: dict = Depends(get_current_user),
+):
     if not settings.NVIDIA_API_KEY:
         raise HTTPException(
             status_code=500,
@@ -86,10 +94,10 @@ async def generate_concept_image(request: ConceptImageRequest):
 
     # Step 1 — distil question + tutor answer into a visual prompt
     visual_prompt = await _build_visual_prompt(
-        question=request.question,
-        subject=request.subject,
-        grade=request.grade_level,
-        tutor_response=request.tutor_response,
+        question=body.question,
+        subject=body.subject,
+        grade=body.grade_level,
+        tutor_response=body.tutor_response,
     )
 
     # Step 2 — call NVIDIA qwen/qwen-image (OpenAI images endpoint)
