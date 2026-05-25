@@ -1,20 +1,44 @@
+# Cloud Build: docker build → Artifact Registry → Cloud Run deploy
+# Triggered by .github/workflows/deploy-frontend.yml on push to branch `frontend`.
+
 steps:
-  - name: 'gcr.io/cloud-builders/docker'
+  - id: build
+    name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '--build-arg'
       - 'VITE_API_URL=$_VITE_API_URL'
       - '-t'
-      - '$_IMAGE'
+      - '$_IMAGE_REPO:$_TAG'
+      - '-t'
+      - '$_IMAGE_REPO:latest'
       - '.'
 
+  - id: deploy
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '$_SERVICE_NAME'
+      - '--image=$_IMAGE_REPO:$_TAG'
+      - '--region=$_REGION'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--port=8080'
+      - '--quiet'
+
 images:
-  - '$_IMAGE'
+  - '$_IMAGE_REPO:$_TAG'
+  - '$_IMAGE_REPO:latest'
 
 substitutions:
   _VITE_API_URL: 'https://placeholder.run.app'
-  _IMAGE: 'us-central1-docker.pkg.dev/career-492408/eduguard/frontend:v2'
+  _IMAGE_REPO: 'us-central1-docker.pkg.dev/career-492408/eduguard/frontend'
+  _TAG: 'latest'
+  _SERVICE_NAME: 'eduguard-frontend'
+  _REGION: 'us-central1'
 
 options:
-  machineType: 'E2_HIGHCPU_8'
+  machineType: E2_HIGHCPU_8
   logging: CLOUD_LOGGING_ONLY

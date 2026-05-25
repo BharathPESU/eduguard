@@ -1,0 +1,76 @@
+# Build and deploy the React frontend to Cloud Run on every push to `frontend`.
+#
+# Required GitHub repository secrets:
+#   GCP_SA_KEY      — JSON key for a GCP service account (see eduguard-frontend/DEPLOY.md)
+#   VITE_API_URL    — Production backend URL baked into the Vite build
+#
+# Optional secrets / variables:
+#   GCP_PROJECT_ID  — defaults to career-492408
+#   CLOUD_RUN_SERVICE (repo variable) — defaults to eduguard-frontend
+#   GCP_REGION (repo variable) — defaults to us-central1
+
+name: Deploy Frontend
+
+on:
+  push:
+    branches:
+      - frontend
+    paths:
+      - 'eduguard-frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+
+concurrency:
+  group: deploy-frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || 'career-492408' }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'eduguard-frontend' }}
+      IMAGE_REPO: us-central1-docker.pkg.dev/career-492408/eduguard/frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
+            echo "::error::Missing GitHub secret GCP_SA_KEY. See eduguard-frontend/DEPLOY.md"
+            exit 1
+          fi
+          if [ -z "${{ secrets.VITE_API_URL }}" ]; then
+            echo "::error::Missing GitHub secret VITE_API_URL (production backend URL)."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Build and deploy (Cloud Build → Cloud Run)
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          gcloud builds submit ./eduguard-frontend \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --config=cloudbuild.yaml \
+            --substitutions="_VITE_API_URL=${{ secrets.VITE_API_URL }},_TAG=${SHORT_SHA},_SERVICE_NAME=${CLOUD_RUN_SERVICE},_REGION=${GCP_REGION},_IMAGE_REPO=${IMAGE_REPO}"
+
+      - name: Print service URL
+        run: |
+          gcloud run services describe "${CLOUD_RUN_SERVICE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format='value(status.url)'
