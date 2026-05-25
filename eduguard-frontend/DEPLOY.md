@@ -26,6 +26,8 @@ Create a service account (e.g. `github-actions-deploy`) in project `career-49240
 | `roles/run.admin` | Deploy Cloud Run |
 | `roles/artifactregistry.writer` | Push images |
 | `roles/iam.serviceAccountUser` | Act as the Cloud Run runtime SA |
+| `roles/storage.objectAdmin` | Upload source to the Cloud Build staging bucket |
+| `roles/serviceusage.serviceUsageConsumer` | Use enabled GCP APIs |
 
 Cloud Build’s default service account also needs permission to deploy to Cloud Run. In **IAM**, grant the Cloud Build service account (`PROJECT_NUMBER@cloudbuild.gserviceaccount.com`):
 
@@ -239,5 +241,7 @@ gcloud builds submit . \
 | Workflow skipped | Push must be on branch `frontend` and touch `eduguard-frontend/**` |
 | `Missing GCP_SA_KEY` | Add secrets in GitHub (see above) |
 | Cloud Build `PERMISSION_DENIED` on deploy | Grant Cloud Build SA `run.admin` + `iam.serviceAccountUser` |
+| `Unable to read file [cloudbuild.yaml]` | Fixed in workflow: use `--config=eduguard-frontend/cloudbuild.yaml` |
+| `forbidden from accessing the bucket ..._cloudbuild` | Add `Storage Object Admin` to `github-actions-deploy` SA |
 | Wrong API URL in browser | Update `VITE_API_URL` secret and push again (value is baked in at build time) |
 | Wrong Cloud Run service | Set `CLOUD_RUN_SERVICE` variable to your actual service name |
