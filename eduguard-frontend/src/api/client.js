@@ -16,6 +16,62 @@ client.interceptors.request.use((config) => {
   return config
 })
 
+const clearStoredSession = () => {
+  localStorage.removeItem('eduguard_access_token')
+  localStorage.removeItem('eduguard_refresh_token')
+  localStorage.removeItem('eduguard_user_email')
+}
+
+const refreshAccessToken = async () => {
+  const refreshToken = localStorage.getItem('eduguard_refresh_token')
+  if (!refreshToken) throw new Error('No refresh token available')
+
+  const res = await axios.post(`${API_BASE}/auth/refresh`, {
+    refresh_token: refreshToken,
+  })
+
+  const accessToken = res.data?.access_token
+  if (!accessToken) throw new Error('Refresh response did not include an access token')
+
+  localStorage.setItem('eduguard_access_token', accessToken)
+  if (res.data?.session?.refresh_token) {
+    localStorage.setItem('eduguard_refresh_token', res.data.session.refresh_token)
+  }
+  if (res.data?.user?.email) {
+    localStorage.setItem('eduguard_user_email', res.data.user.email)
+  }
+
+  return accessToken
+}
+
+client.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config
+    const isUnauthorized = error.response?.status === 401
+    const isAuthRequest = originalRequest?.url?.startsWith('/auth/')
+
+    if (!isUnauthorized || originalRequest?._retry || isAuthRequest) {
+      return Promise.reject(error)
+    }
+
+    originalRequest._retry = true
+
+    try {
+      const accessToken = await refreshAccessToken()
+      originalRequest.headers = originalRequest.headers || {}
+      originalRequest.headers.Authorization = `Bearer ${accessToken}`
+      return client(originalRequest)
+    } catch (refreshError) {
+      clearStoredSession()
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+      return Promise.reject(refreshError)
+    }
+  }
+)
+
 export const signup = async (payload) => {
   const res = await client.post('/auth/signup', payload)
   return res.data

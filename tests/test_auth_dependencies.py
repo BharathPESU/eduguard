@@ -69,3 +69,32 @@ def test_decode_rejects_invalid_supabase_token(monkeypatch):
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Invalid or expired token."
+
+
+def test_decode_falls_back_to_supabase_when_local_jwt_validation_fails(monkeypatch):
+    monkeypatch.setattr(settings, "SUPABASE_JWT_SECRET", "wrong-secret")
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_ANON_KEY", "anon-key")
+    monkeypatch.setattr(
+        dependencies,
+        "_decode_jwt",
+        lambda token: (_ for _ in ()).throw(
+            HTTPException(status_code=401, detail="Invalid or expired token")
+        ),
+    )
+
+    response = httpx.Response(
+        200,
+        json={
+            "id": "user-456",
+            "email": "teacher@example.com",
+            "app_metadata": {"role": "teacher"},
+        },
+    )
+    fake_client = FakeAsyncClient(response)
+    monkeypatch.setattr(dependencies.httpx, "AsyncClient", lambda timeout: fake_client)
+
+    user = asyncio.run(dependencies._decode("access-token"))
+
+    assert user["sub"] == "user-456"
+    assert user["app_metadata"] == {"role": "teacher"}

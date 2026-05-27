@@ -102,7 +102,13 @@ async def _get_user_from_supabase(token: str) -> dict:
 async def _decode(token: str) -> dict:
     """Verify a Supabase access token and return normalized claims."""
     if settings.SUPABASE_JWT_SECRET:
-        return _decode_jwt(token)
+        try:
+            return _decode_jwt(token)
+        except HTTPException as exc:
+            if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
+                raise
+            if exc.status_code != status.HTTP_401_UNAUTHORIZED:
+                raise
     return await _get_user_from_supabase(token)
 
 

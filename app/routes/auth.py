@@ -1,6 +1,7 @@
 import asyncio
 from urllib.parse import urlencode
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -15,6 +16,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 class AuthCredentials(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=1)
 
 
 def _get_supabase():
@@ -96,6 +101,62 @@ async def login(request: Request, credentials: AuthCredentials):
         })
     )
     return _auth_response_payload(response, "success")
+
+
+@router.post("/refresh")
+@limiter.limit("20/minute")
+async def refresh_session(request: Request, payload: RefreshRequest):
+    if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="SUPABASE_URL and SUPABASE_ANON_KEY must be configured.",
+        )
+
+    url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/token?grant_type=refresh_token"
+    headers = {
+        "apikey": settings.SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {settings.SUPABASE_ANON_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                url,
+                headers=headers,
+                json={"refresh_token": payload.refresh_token},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to refresh Supabase session.",
+        ) from exc
+
+    if response.status_code in {400, 401, 403}:
+        raise HTTPException(
+            status_code=401,
+            detail="Session expired. Please log in again.",
+        )
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to refresh Supabase session.",
+        )
+
+    data = response.json()
+    session = {
+        "access_token": data.get("access_token"),
+        "refresh_token": data.get("refresh_token") or payload.refresh_token,
+        "token_type": data.get("token_type", "bearer"),
+        "expires_in": data.get("expires_in"),
+        "expires_at": data.get("expires_at"),
+    }
+    return {
+        "status": "success",
+        "user": data.get("user"),
+        "session": session,
+        "access_token": session["access_token"],
+    }
 
 
 @router.get("/google")
