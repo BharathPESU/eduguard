@@ -20,6 +20,7 @@ import fitz  # pymupdf
 from openai import OpenAI
 
 from app.config import settings
+from app.utils.logger import logger
 
 
 # ──────────────────────────────────────────────────────────
@@ -197,16 +198,16 @@ def extract_questions_from_file(
                 try:
                     page_qs = _extract_from_image_b64(client, b64, start_num)
                     questions.extend(page_qs)
-                except Exception:
-                    # Vision failed for this page — skip silently
-                    pass
+                except Exception as e:
+                    logger.exception("Vision extraction failed for page")
 
             # If vision yielded nothing, fall back to text extraction
             if not questions:
                 text = _pdf_to_text(file_bytes)
                 if text.strip():
                     questions = _extract_from_text(client, text)
-        except Exception:
+        except Exception as e:
+            logger.exception("PDF image conversion or vision extraction failed, falling back to text")
             # PDF image conversion failed — extract as text
             text = _pdf_to_text(file_bytes)
             if text.strip():
